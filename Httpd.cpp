@@ -9,46 +9,55 @@ void Server::start_up(int port)
     struct addrinfo hints, *listp, *p;
     int listenfd, optval = 1;
 
+    //设置addrinfo参数
     memset(&hints, 0, sizeof(struct addrinfo));
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG | AI_NUMERICSERV;
 
+    //把int型的port转换为port_ch来作为getaddrinfo函数的参数
     char port_ch[6]={0};
     sprintf(port_ch, "%d", port);
     getaddrinfo(NULL, port_ch, &hints, &listp);
 
+    //获得listp列表，存储了有可能能够使用的套接字地址
     for(p = listp; p; p = p->ai_next)
     {
         if(listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol) < 0)
-            continue;
-        
+            continue; //不断尝试获取套接字
+        //端口复用，在服务器终止，重启后立即开始接收请求
         setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, sizeof(int));
+        //绑定文件描述符和端口号、ip地址
         if(bind(listenfd, p->ai_addr, p->ai_addrlen) == 0) break;
+        //失败，关闭描述符
         close(listenfd);
     }
     freeaddrinfo(listp);
     if(!p)
-        error_exit("No address worked");
+        error_exit("目前没有可用地址");
     if(listen(listenfd, 1024) < 0)
     {
         close(listenfd);
-        error_exit("listen failed");
+        error_exit("开启侦听失败");
     }
 
     port = atoi(port_ch);
     server_port = port;
     server_socket = listenfd;
+    //在终端显示服务器运行在port端口上
     std::cout << "httpd running on port " << port << std::endl;
 
+    //客户套接字
     struct sockaddr_in client_name;
     socklen_t client_name_len = sizeof(client_name);
     int client_socket = -1;
     
+    //服务器启动，进入循环，接收请求
     while(1)
     {
         client_socket = accept(server_socket, (struct sockaddr*)&client_name, &client_name_len);
         if(client_socket = -1)
-            error_exit("accept");
+            error_exit("接收请求失败");
+        //将请求加入线程池工作队列，如果工作队列已满则将阻塞
         th_pool.work_insert(client_socket);
     }
 
@@ -123,6 +132,14 @@ int Thread_Pool::work_remove()
 void Thread_Pool::accept_request(int client)
 {
     
+}
+void Thread_Pool::serve_file(int client, std::string file)
+{
+
+}
+void Thread_Pool::execute_cgi(int client, std::string path, Method method, std::string query_string)
+{
+
 }
 /*线程池实现 结束*/
 

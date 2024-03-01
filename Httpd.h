@@ -26,7 +26,7 @@ public:
     Server(int th_num = 4, int wn_max = 16);
     ~Server();
     void start_up(int port);//启动服务器，参数为服务器运行端口
-    void error_exit(std::string error_mes);
+    void error_exit(std::string error_mes);//异常返回
 
 private:
     Thread_Pool th_pool;
@@ -43,13 +43,13 @@ public:
     ~Thread_Pool();
 
     enum Method{GET,POST};//服务器所支持的方法
-    void thread_start();
-    void accept_request(int client);
-    void serve_file(int client, std::string file);
-    void execute_cgi(int client, std::string path, Method method, std::string query_string);
+    void thread_start();//线程启动函数
+    void accept_request(int client);//响应请求，执行工作
+    void serve_file(int client, std::string file);//当请求为静态内容
+    void execute_cgi(int client, std::string path, Method method, std::string query_string);//请求为动态内容，执行cgi
 
-    void work_insert(int object);
-    int work_remove();
+    void work_insert(int object);//将工作加入线程池工作队列
+    int work_remove();//从工作队列中取出工作
 
 private:
     /*工作队列*/
