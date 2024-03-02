@@ -129,15 +129,78 @@ int Thread_Pool::work_remove()
     sem_post(&slots);
     return tk;
 }
-void Thread_Pool::accept_request(int client)
+void *Thread_Pool::accept_request(int client)
 {
-    
+    std::string buf, path, method, url, query_string;
+    int bytenum;
+    struct stat st; 
+    Method md = POST;
+    bool server_type = false;//区分静态内容和动态内容，默认为静态
+
+    bytenum = httpd_getline(client, buf, 1024);
+    //输入流，用来读取方法，url
+    std::stringstream cin_stream(buf);
+    //读取方法和url，http版本不读取
+    cin_stream >> method >> url;
+    if(method != "GET" && method != "POST")
+    {
+        //httpd只定义了GET和POST方法
+        re_message.respond(Respond_Message::Not_Implemented, client);
+        return NULL;
+    }
+    //POST方法则为动态内容
+    if(method == "POST")
+        server_type = true;
+    if(method == "GET")
+    {
+        md = GET;
+        //如果GET方法带?参数则请求动态内容，设置环境变量
+        std::size_t pos = url.find("?");
+        if(pos != std::string::npos)
+        {    
+            query_string = std::string(url, pos + 1);
+            url.erase(pos);
+            server_type = true;
+        }
+    }
+
+    path = "htdocs" + url;
+    //如果path是一个目录，默认设置首页为index.html
+    if(path.back() == '/')
+        path += "index.html";
+
+    //访问的网页不存在，读取所有请求头部信息，返回404
+    if(stat(path.c_str(), &st) == -1)
+    {
+        while(bytenum > 0 && buf != "\n")
+            bytenum = httpd_getline(client, buf, 1024);
+        re_message.respond(Respond_Message::Not_Found, client);
+    }
+    else 
+    {
+        //访问文件为目录则转到默认首页
+        if((st.st_mode & S_IFMT) == S_IFDIR)
+            path += "/index.html";
+
+        //所有者，用户组，其他人具有可执行权限
+        if((st.st_mode & S_IXUSR) || 
+            (st.st_mode & S_IXGRP) || 
+            (st.st_mode & S_IXOTH))
+            server_type = true;
+
+        if(server_type)
+            execute_cgi(client, path, md, query_string);
+        else 
+            serve_file(client, path);
+    }
+    close(client);
+    return NULL;
 }
-void Thread_Pool::serve_file(int client, std::string file)
+void Thread_Pool::serve_file(int client, std::string &file)
 {
 
 }
-void Thread_Pool::execute_cgi(int client, std::string path, Method method, std::string query_string)
+void Thread_Pool::execute_cgi(int client, std::string &path, Method method, std::string &query_string)
 {
 
 }
@@ -188,3 +251,40 @@ void Respond_Message::status_not_implemented_501(int client)
     send(client, message.c_str(), message.length(), 0);
 }
 /*报文响应实现 结束*/
+
+/*辅助函数实现 开始*/
+int httpd_getline(int fd, std::string &buf, int size)
+{
+    //字节数记录本次读取的数量
+    int bytecount = 0, res_recv = 0;
+    char ch = '\0';
+    buf.clear();
+ 
+    /*把终止条件统一为 \n 换行符，标准化 buf 数组*/
+    while ((bytecount < size - 1) && (ch != '\n'))
+    {
+        /*一次仅接收一个字节*/
+        res_recv = recv(fd, &ch, 1, 0);
+        if (res_recv > 0)
+        {
+            /*收到 \r 则继续接收下个字节，因为换行符可能是 \r\n */
+            if (ch == '\r')
+            {
+                /*使用 MSG_PEEK 标志查看下一次接收的字节但不读取*/
+                res_recv = recv(fd, &ch, 1, MSG_PEEK);
+                /*但如果是换行符则接收*/
+                if ((res_recv > 0) && (ch == '\n'))
+                    recv(fd, &ch, 1, 0);
+                else
+                    ch = '\n';
+            }
+            /*存到缓冲区*/
+            buf[bytecount++] = ch;
+        }
+        else
+            ch = '\n';
+    }
+    /*返回此次接收的字节数*/
+    return bytecount;
+}
+/*辅助函数实现 结束*/

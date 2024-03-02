@@ -14,6 +14,9 @@
 #include <queue>
 #include <vector>
 #include <semaphore.h>
+#include <sstream>
+#include <errno.h>
+#include <sys/stat.h>
 
 class Thread_Pool;
 class Respond_Message;
@@ -30,7 +33,6 @@ public:
 
 private:
     Thread_Pool th_pool;
-    Respond_Message re_message;
     int server_port;
     int server_socket;
 };
@@ -44,9 +46,9 @@ public:
 
     enum Method{GET,POST};//服务器所支持的方法
     void thread_start();//线程启动函数
-    void accept_request(int client);//响应请求，执行工作
-    void serve_file(int client, std::string file);//当请求为静态内容
-    void execute_cgi(int client, std::string path, Method method, std::string query_string);//请求为动态内容，执行cgi
+    void *accept_request(int client);//响应请求，执行工作
+    void serve_file(int client, std::string &file);//当请求为静态内容
+    void execute_cgi(int client, std::string &path, Method method, std::string &query_string);//请求为动态内容，执行cgi
 
     void work_insert(int object);//将工作加入线程池工作队列
     int work_remove();//从工作队列中取出工作
@@ -61,6 +63,9 @@ private:
     /*工作者线程*/
     std::vector<std::shared_ptr<std::thread>> pool;
     int thread_num;
+
+    /*报文响应*/
+    Respond_Message re_message;
 };
 
 //报文响应类
@@ -69,9 +74,13 @@ class Respond_Message
 public:
     enum Status{OK,Not_Found,Not_Implemented};
     void respond(Status st, int client);//根据状态码返回不同响应报文
+private:
     void status_ok_200(int client);//OK:200
     void status_not_found_404(int client);//Not Found:404
     void status_not_implemented_501(int client);//Not Implemented:501
 };
+
+//辅助函数
+int httpd_getline(int fd, std::string &buf, int size);//从文件描述符中读取一行到buf字符串中
 
 #endif
