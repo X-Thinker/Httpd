@@ -17,6 +17,8 @@
 #include <sstream>
 #include <errno.h>
 #include <sys/stat.h>
+#include <fstream>
+#include <wait.h>
 
 class Thread_Pool;
 class Respond_Message;
@@ -44,7 +46,7 @@ public:
     Thread_Pool(int th_num = 4, int wn_max = 16);
     ~Thread_Pool();
 
-    enum Method{GET,POST};//服务器所支持的方法
+    enum Method{GET, POST};//服务器所支持的方法
     void thread_start();//线程启动函数
     void *accept_request(int client);//响应请求，执行工作
     void serve_file(int client, std::string &file);//当请求为静态内容
@@ -72,11 +74,13 @@ private:
 class Respond_Message
 {
 public:
-    enum Status{OK,Not_Found,Not_Implemented};
+    enum Status{OK, Not_Found, Bad_Request, Internal_Server_Error, Not_Implemented};
     void respond(Status st, int client);//根据状态码返回不同响应报文
 private:
     void status_ok_200(int client);//OK:200
+    void status_bad_request_400(int client);//Bad Request:400
     void status_not_found_404(int client);//Not Found:404
+    void status_internal_server_error_500(int client);//Internal Server Error:500
     void status_not_implemented_501(int client);//Not Implemented:501
 };
 

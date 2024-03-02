@@ -198,11 +198,138 @@ void *Thread_Pool::accept_request(int client)
 }
 void Thread_Pool::serve_file(int client, std::string &file)
 {
+    int bytenum = 1;
+    std::string buf;
+    //读取并丢弃报头
+    while(bytenum > 0 && buf != "\n")
+            bytenum = httpd_getline(client, buf, 1024);
 
+    //以只读打开目标文件
+    std::ifstream target_file(file);
+    if(!target_file.is_open())
+        re_message.respond(Respond_Message::Not_Found, client);
+    else 
+    {
+        //打开成功，状态200
+        re_message.respond(Respond_Message::OK, client);
+        //buf读入目标文件的所有内容
+        std::stringstream tmp;
+        tmp << target_file.rdbuf();
+        buf = tmp.str();
+        //向客户端发送buf
+        send(client, buf.c_str(), buf.length(), 0);
+    }
+    target_file.close();
 }
 void Thread_Pool::execute_cgi(int client, std::string &path, Method method, std::string &query_string)
 {
+    std::string buf;
+    int cgi_output[2], cgi_input[2];
+    pid_t pid;
+    int status = 0, bytenum = 1, content_length = -1;
 
+    //GET方法直接丢弃报头
+    if(method = GET)
+        while(bytenum > 0 && buf != "\n")
+            bytenum = httpd_getline(client, buf, 1024);
+    else
+    {
+        while(bytenum > 0 && buf != "\n")
+        {
+            bytenum = httpd_getline(client, buf, 1024);
+            size_t pos = buf.find("Content-Length:");
+            if(pos == std::string::npos)
+                continue;
+            else 
+                content_length = std::stoi(std::string(buf, pos + 15));
+        }
+        //没有找到 Content-Length
+        if(content_length = -1)
+        {
+            re_message.respond(Respond_Message::Bad_Request, client);
+            return;
+        }
+    }
+
+    //正确,返回状态码 200
+    buf = "HTTP/1.0 200 OK\r\n";
+    send(client, buf.c_str(), buf.length(), 0);
+    
+    //建立进程写管道
+    if(pipe(cgi_output) < 0)
+    {
+        re_message.respond(Respond_Message::Internal_Server_Error, client);
+        return;
+    }
+    //建立进程读管道
+    if(pipe(cgi_input) < 0)
+    {
+        re_message.respond(Respond_Message::Internal_Server_Error, client);
+        return;
+    }
+
+    //子进程
+    if((pid = fork()) < 0)
+    {
+        re_message.respond(Respond_Message::Internal_Server_Error, client);
+        return;
+    }
+    
+    if(pid == 0) //子进程工作
+    {
+        std::string meth_env, query_env, length_env;
+
+        //把 STDOUT 重定向到 cgi_output 的写入端
+        dup2(cgi_output[1], 1);
+        //把 STDIN 重定向到 cgi_input 的读取端
+        dup2(cgi_input[0], 0);
+        //关闭 cgi_input 的写入端 和 cgi_output 的读取端
+        close(cgi_input[1]);
+        close(cgi_output[0]);
+        //设置method环境变量
+        std::string meth = (method == GET ? "GET" : "POST");
+        meth_env = "REQUEST_METHOD=" + meth;
+        putenv(meth_env.data());
+
+        if(method = GET)
+        {
+            //设置 query string 环境变量
+            query_env = "QUERY_STRING=" + query_string;
+            putenv(query_env.data());
+        }
+        else
+        {
+            //设置 content length 环境
+            length_env = "CONTENT_LENGTH=" + std::to_string(content_length);
+            putenv(length_env.data());
+        }
+        //execl函数执行 cgi程序
+        execl(path.c_str(), path.c_str(), NULL);
+        exit(0);
+    }
+    else // 父进程工作
+    {
+        //关闭 cgi_input 的读取端 和 cgi_output 的写入端
+        close(cgi_output[1]);
+        close(cgi_input[0]);
+        char ch = '\0';
+        if(method == POST)
+            for(int i = 0; i < content_length; i++)
+            {
+                recv(client, &ch, 1, 0);
+                //把 POST 数据写入 cgi_input，已重定向到 STDIN
+                write(cgi_input[1], &ch, 1);
+            }
+        //读取 cgi_output 的管道输出到客户端，已重定向到STDOUT
+        while(read(cgi_output[0], &ch, 1) > 0)
+            send(client, &ch, 1, 0);
+        
+        //关闭管道
+        close(cgi_output[0]);
+        close(cgi_input[1]);
+        //等待子进程结束
+        waitpid(pid, &status, 0);
+    }
 }
 /*线程池实现 结束*/
 
@@ -225,6 +352,15 @@ void Respond_Message::status_ok_200(int client)
     message += "Content-Type: text/html\r\n\r\n";
     send(client, message.c_str(), message.length(), 0);
 }
+void Respond_Message::status_bad_request_400(int client)
+{
+    std::string message;
+    message += "HTTP/1.0 400 BAD REQUEST\r\n";
+    message += "Content-type: text/html\r\n\r\n";
+    message += "<P>Your browser sent a bad request, ";
+    message += "such as a POST without a Content-Length.\r\n";
+    send(client, message.c_str(), message.length(), 0);
+}
 void Respond_Message::status_not_found_404(int client)
 {
     std::string message;
@@ -236,6 +372,14 @@ void Respond_Message::status_not_found_404(int client)
     message += "your request because the resource specified\r\n";
     message += "is unavailable or nonexistent.\r\n";
     message += "</BODY></HTML>\r\n";
+    send(client, message.c_str(), message.length(), 0);
+}
+void Respond_Message::status_internal_server_error_500(int client)
+{
+    std::string message;
+    message += "HTTP/1.0 500 Internal Server Error\r\n";
+    message += "Content-type: text/html\r\n\r\n";
+    message += "<P>Error prohibited CGI execution.\r\n";
     send(client, message.c_str(), message.length(), 0);
 }
 void Respond_Message::status_not_implemented_501(int client)
@@ -278,8 +422,7 @@ int httpd_getline(int fd, std::string &buf, int size)
                 else
                     ch = '\n';
             }
-            /*存到缓冲区*/
-            buf[bytecount++] = ch;
+            buf.push_back(ch);
         }
         else
             ch = '\n';
