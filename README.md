@@ -22,7 +22,7 @@ graph TD
     thread_work--> |返回工作结果n| browsern
 ```
   
-####类结构  
+#### 类结构  
 >Server
 >>start_up ( int ) 给定端口启动服务器  
 >>error_exit ( string ) 异常报错并退出  
