@@ -20,23 +20,20 @@
 #include <fstream>
 #include <wait.h>
 
-class Thread_Pool;
-class Respond_Message;
 const std::string httpdname = "Server: Think Tiny Httpd\r\n";
 
-//服务器类
-class Server
+//报文响应类
+class Respond_Message
 {
 public:
-    Server(int th_num = 4, int wn_max = 16);
-    ~Server();
-    void start_up(int port);//启动服务器，参数为服务器运行端口
-    void error_exit(std::string error_mes);//异常返回
-
+    enum Status{OK, Not_Found, Bad_Request, Internal_Server_Error, Not_Implemented};
+    void respond(Status st, int client);//根据状态码返回不同响应报文
 private:
-    Thread_Pool th_pool;
-    int server_port;
-    int server_socket;
+    void status_ok_200(int client);//OK:200
+    void status_bad_request_400(int client);//Bad Request:400
+    void status_not_found_404(int client);//Not Found:404
+    void status_internal_server_error_500(int client);//Internal Server Error:500
+    void status_not_implemented_501(int client);//Not Implemented:501
 };
 
 //线程池类
@@ -70,18 +67,19 @@ private:
     Respond_Message re_message;
 };
 
-//报文响应类
-class Respond_Message
+//服务器类
+class Server
 {
 public:
-    enum Status{OK, Not_Found, Bad_Request, Internal_Server_Error, Not_Implemented};
-    void respond(Status st, int client);//根据状态码返回不同响应报文
+    Server(int th_num = 4, int wn_max = 16);
+    ~Server();
+    void start_up(int port);//启动服务器，参数为服务器运行端口
+    void error_exit(std::string error_mes);//异常返回
+
 private:
-    void status_ok_200(int client);//OK:200
-    void status_bad_request_400(int client);//Bad Request:400
-    void status_not_found_404(int client);//Not Found:404
-    void status_internal_server_error_500(int client);//Internal Server Error:500
-    void status_not_implemented_501(int client);//Not Implemented:501
+    Thread_Pool th_pool;
+    int server_port;
+    int server_socket;
 };
 
 //辅助函数

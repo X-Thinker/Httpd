@@ -1,8 +1,8 @@
 #include "Httpd.h"
 
 /*服务器实现 开始*/
-Server::Server(int th_num = 4, int wn_max = 16):
-    th_pool(th_num, wn_max),server_port(0),server_socket(-1){}
+Server::Server(int th_num, int wn_max):
+th_pool(th_num, wn_max),server_port(0),server_socket(-1){}
 Server::~Server(){}
 void Server::start_up(int port)
 {
@@ -22,7 +22,7 @@ void Server::start_up(int port)
     //获得listp列表，存储了有可能能够使用的套接字地址
     for(p = listp; p; p = p->ai_next)
     {
-        if(listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol) < 0)
+        if((listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0)
             continue; //不断尝试获取套接字
         //端口复用，在服务器终止，重启后立即开始接收请求
         setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, sizeof(int));
@@ -34,7 +34,7 @@ void Server::start_up(int port)
     freeaddrinfo(listp);
     if(!p)
         error_exit("目前没有可用地址");
-    if(listen(listenfd, 1024) < 0)
+    if(listen(listenfd, 5) < 0)
     {
         close(listenfd);
         error_exit("开启侦听失败");
@@ -45,7 +45,7 @@ void Server::start_up(int port)
     server_socket = listenfd;
     //在终端显示服务器运行在port端口上
     std::cout << "httpd running on port " << port << std::endl;
-
+    
     //客户套接字
     struct sockaddr_in client_name;
     socklen_t client_name_len = sizeof(client_name);
@@ -55,7 +55,7 @@ void Server::start_up(int port)
     while(1)
     {
         client_socket = accept(server_socket, (struct sockaddr*)&client_name, &client_name_len);
-        if(client_socket = -1)
+        if(client_socket == -1)
             error_exit("接收请求失败");
         //将请求加入线程池工作队列，如果工作队列已满则将阻塞
         th_pool.work_insert(client_socket);
@@ -72,7 +72,7 @@ void Server::error_exit(std::string error_mes)
 /*服务器实现 结束*/
 
 /*线程池实现 开始*/
-Thread_Pool::Thread_Pool(int th_num = 4, int wn_max = 16)
+Thread_Pool::Thread_Pool(int th_num, int wn_max)
 {
     if(th_num > 16)
     {
@@ -92,10 +92,10 @@ Thread_Pool::Thread_Pool(int th_num = 4, int wn_max = 16)
     sem_init(&slots, 0 ,worknum_max);
     sem_init(&tasks, 0 ,0);
 
-    //创建工作线程
+    //创建工作者线程
     for(int i = 1; i <= thread_num; i++)
     {
-        std::shared_ptr<std::thread> new_thread(new std::thread(thread_start));
+        std::shared_ptr<std::thread> new_thread(new std::thread(&Thread_Pool::thread_start, this));
         new_thread->detach();//分离线程
         pool.push_back(new_thread);
     }
@@ -193,7 +193,7 @@ void *Thread_Pool::accept_request(int client)
         else 
             serve_file(client, path);
     }
-    close(client);
+    
     return NULL;
 }
 void Thread_Pool::serve_file(int client, std::string &file)
@@ -237,14 +237,14 @@ void Thread_Pool::execute_cgi(int client, std::string &path, Method method, std:
         while(bytenum > 0 && buf != "\n")
         {
             bytenum = httpd_getline(client, buf, 1024);
-            size_t pos = buf.find("Content-Length:");
+            size_t pos = buf.find("Content-Length: ");
             if(pos == std::string::npos)
                 continue;
             else 
-                content_length = std::stoi(std::string(buf, pos + 15));
+                content_length = std::stoi(std::string(buf, pos + 16));
         }
         //没有找到 Content-Length
-        if(content_length = -1)
+        if(content_length == -1)
         {
             re_message.respond(Respond_Message::Bad_Request, client);
             return;
@@ -254,7 +254,7 @@ void Thread_Pool::execute_cgi(int client, std::string &path, Method method, std:
     //正确,返回状态码 200
     buf = "HTTP/1.0 200 OK\r\n";
     send(client, buf.c_str(), buf.length(), 0);
-    
+
     //建立进程写管道
     if(pipe(cgi_output) < 0)
     {
@@ -274,7 +274,7 @@ void Thread_Pool::execute_cgi(int client, std::string &path, Method method, std:
         re_message.respond(Respond_Message::Internal_Server_Error, client);
         return;
     }
-    
+
     if(pid == 0) //子进程工作
     {
         std::string meth_env, query_env, length_env;
@@ -339,7 +339,9 @@ void Respond_Message::respond(Status st, int client)
     switch (st)
     {
     case OK: status_ok_200(client); break;
+    case Bad_Request: status_bad_request_400(client); break;
     case Not_Found: status_not_found_404(client); break;
+    case Internal_Server_Error: status_internal_server_error_500(client); break;
     case Not_Implemented: status_not_implemented_501(client); break;
     default: break;
     }
@@ -422,7 +424,8 @@ int httpd_getline(int fd, std::string &buf, int size)
                 else
                     ch = '\n';
             }
-            buf.push_back(ch);
+            buf.push_back(ch);    
+            bytecount++;
         }
         else
             ch = '\n';
