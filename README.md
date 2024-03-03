@@ -17,3 +17,5 @@ graph TD
     browsern[浏览器n]--> |http请求n| server
     thread_work--> |返回工作结果n| browsern
 ```
+
+OK
